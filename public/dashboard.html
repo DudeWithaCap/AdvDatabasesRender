@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard | Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="/dashboard.html" class="active">Dashboard</a>
+    <a href="/products.html" class="nav-admin-only">Products</a>
+    <a href="/orders.html" class="nav-admin-only">Orders</a>
+    <a href="/inventory.html" class="nav-admin-only">Inventory</a>
+    <span class="spacer"></span>
+    <button class="btn-logout" id="logoutBtn">Logout</button>
+  </nav>
+
+  <main class="container">
+    <h1>Analytics Dashboard</h1>
+    <div id="content" class="loading">Loading...</div>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (function() {
+      if (!isLoggedIn()) { window.location.replace('/login.html'); return; }
+      const analyst = isAnalyst();
+      if (analyst) { document.querySelectorAll('.nav-admin-only').forEach(function(el) { el.style.display = 'none'; }); }
+      document.getElementById('logoutBtn').onclick = logout;
+
+    async function load() {
+      const content = document.getElementById('content');
+      try {
+        const [summaryRes, salesRes, topRes] = await Promise.all([
+          getSummary(),
+          getSalesByCategory(),
+          getTopProducts(5)
+        ]);
+
+        const s = summaryRes?.data || {};
+        const salesData = salesRes?.data || [];
+        const topData = topRes?.data || [];
+        const maxSales = Math.max(...salesData.map(x => x.totalQuantity), 1) || 1;
+        const maxTop = Math.max(...topData.map(x => x.totalSold), 1) || 1;
+
+        content.innerHTML = `
+          <div class="summary-grid">
+            <div class="summary-card"><span class="label">Total Orders</span><div class="value">${s.totalOrders ?? 0}</div></div>
+            <div class="summary-card"><span class="label">Total Revenue</span><div class="value">$${(s.totalRevenue ?? 0).toLocaleString()}</div></div>
+            <div class="summary-card"><span class="label">Products</span><div class="value">${s.totalProducts ?? 0}</div></div>
+            <div class="summary-card"><span class="label">Customers</span><div class="value">${s.totalCustomers ?? 0}</div></div>
+          </div>
+
+          <div class="chart-section">
+            <h3>Orders by Status</h3>
+            ${(s.orderCountByStatus || []).map(o => `
+              <div class="bar-item">
+                <span class="bar-label">${o._id}</span>
+                <div class="bar-wrap"><div class="bar-fill" style="width:${(o.count / Math.max(s.totalOrders,1)) * 100}%"></div></div>
+                <span class="bar-value">${o.count}</span>
+              </div>
+            `).join('') || '<p>No orders yet</p>'}
+          </div>
+
+          <div class="chart-section">
+            <h3>Sales by Category</h3>
+            ${salesData.map(c => `
+              <div class="bar-item">
+                <span class="bar-label">${c.categoryName}</span>
+                <div class="bar-wrap"><div class="bar-fill" style="width:${(c.totalQuantity / maxSales) * 100}%"></div></div>
+                <span class="bar-value">${c.totalQuantity} sold, $${(c.totalRevenue || 0).toFixed(0)}</span>
+              </div>
+            `).join('') || '<p>No sales data yet</p>'}
+          </div>
+
+          <div class="chart-section">
+            <h3>Top Products</h3>
+            ${topData.map(p => `
+              <div class="bar-item">
+                <span class="bar-label">${p.productName}</span>
+                <div class="bar-wrap"><div class="bar-fill" style="width:${(p.totalSold / maxTop) * 100}%"></div></div>
+                <span class="bar-value">${p.totalSold} sold</span>
+              </div>
+            `).join('') || '<p>No product sales yet</p>'}
+          </div>
+
+          ${analyst ? '' : `
+          <div class="chart-section">
+            <h3>Quick Add Product</h3>
+            <p style="color:#94a3b8; font-size:0.9rem; margin-bottom:0.75rem;"></p>
+            <form id="quickAddForm" class="form-inline" style="gap:0.75rem; flex-wrap:wrap;">
+              <input type="text" id="qaName" placeholder="Name" required style="min-width:200px;">
+              <select id="qaCategory" required style="min-width:160px;">
+                <option value="">Loading categories...</option>
+              </select>
+              <input type="text" id="qaBrand" placeholder="Brand" style="min-width:120px;">
+              <input type="number" id="qaPrice" placeholder="Price" min="0" step="0.01">
+              <input type="number" id="qaStock" placeholder="Stock" min="0" step="1">
+              <input type="text" id="qaCpu" placeholder="CPU">
+              <input type="text" id="qaRam" placeholder="RAM">
+              <input type="text" id="qaStorage" placeholder="Storage">
+              <button type="submit" class="btn btn-sm">Add</button>
+              <span id="qaMsg" class="error-msg" style="margin-left:0.5rem;"></span>
+            </form>
+          </div>
+          `}
+        `;
+
+        if (!analyst) {
+          try {
+            const catRes = await getCategories();
+            const select = document.getElementById('qaCategory');
+            if (select && catRes.data) {
+              select.innerHTML = '<option value=\"\">Select category</option>' +
+                catRes.data.map(c => `<option value=\"${c._id}\">${c.name}</option>`).join('');
+            }
+          } catch (e) {
+            const select = document.getElementById('qaCategory');
+            if (select) {
+              select.innerHTML = '<option value=\"\">Categories unavailable</option>';
+            }
+          }
+
+          const form = document.getElementById('quickAddForm');
+          if (form) {
+            form.addEventListener('submit', async (e) => {
+              e.preventDefault();
+              const msgEl = document.getElementById('qaMsg');
+              msgEl.textContent = '';
+              const body = {
+                name: document.getElementById('qaName').value.trim(),
+                categoryId: document.getElementById('qaCategory').value,
+                brand: document.getElementById('qaBrand').value.trim(),
+                price: parseFloat(document.getElementById('qaPrice').value || '0'),
+                stock: parseInt(document.getElementById('qaStock').value || '0', 10),
+                specs: {
+                  cpu: document.getElementById('qaCpu').value.trim(),
+                  ram: document.getElementById('qaRam').value.trim(),
+                  storage: document.getElementById('qaStorage').value.trim()
+                }
+              };
+              if (!body.name || !body.categoryId) {
+                msgEl.textContent = 'Name and category are required.';
+                return;
+              }
+              try {
+                await createProduct(body);
+                msgEl.style.color = '#4ade80';
+                msgEl.textContent = 'Product added.';
+                form.reset();
+                load();
+              } catch (err) {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = err.message || 'Failed to add product';
+              }
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Dashboard load error:', err);
+        content.innerHTML = `<p class="error-msg">${err.message}</p><p style="font-size:0.85rem; margin-top:0.5rem;">Check the browser console (F12) for details. Make sure the server is running and MongoDB is connected.</p>`;
+      }
+    }
+
+      load();
+    })();
+  </script>
+</body>
+</html>

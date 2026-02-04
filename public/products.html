@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Products | Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="/dashboard.html">Dashboard</a>
+    <a href="/products.html" class="active nav-admin-only">Products</a>
+    <a href="/orders.html" class="nav-admin-only">Orders</a>
+    <a href="/inventory.html" class="nav-admin-only">Inventory</a>
+    <span class="spacer"></span>
+    <button class="btn-logout" id="logoutBtn">Logout</button>
+  </nav>
+
+  <main class="container">
+    <h1>Products</h1>
+    <div id="content" class="loading">Loading...</div>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (function() {
+      if (!isLoggedIn()) { window.location.replace('/login.html'); return; }
+      if (isAnalyst()) { window.location.replace('/dashboard.html'); return; }
+      document.getElementById('logoutBtn').onclick = logout;
+
+    async function loadProducts() {
+      const content = document.getElementById('content');
+      try {
+        const res = await getProducts();
+        const products = res.data || [];
+
+        content.innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Category</th>
+                  <th>Brand</th>
+                  <th>Price</th>
+                  <th>Stock</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${products.map(p => `
+                  <tr data-id="${p._id}">
+                    <td>${p.name}</td>
+                    <td>${p.categoryId?.name || '-'}</td>
+                    <td>${p.brand || '-'}</td>
+                    <td><input type="number" step="0.01" min="0" value="${p.price}" class="price-input" style="width:80px"> $</td>
+                    <td><input type="number" min="0" value="${p.stock}" class="stock-input" style="width:60px"></td>
+                    <td>
+                      <button class="btn btn-sm btn-update">Update</button>
+                      <button class="btn btn-sm btn-danger btn-delete">Delete</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        content.querySelectorAll('.btn-update').forEach(btn => {
+          btn.onclick = async () => {
+            const row = btn.closest('tr');
+            const id = row.dataset.id;
+            const price = parseFloat(row.querySelector('.price-input').value);
+            const stock = parseInt(row.querySelector('.stock-input').value);
+            if (stock < 0) { alert('Stock cannot be negative'); return; }
+            try {
+              await updateProduct(id, { price, stock });
+              loadProducts();
+            } catch (e) { alert(e.message); }
+          };
+        });
+
+        content.querySelectorAll('.btn-delete').forEach(btn => {
+          btn.onclick = async () => {
+            if (!confirm('Delete this product?')) return;
+            const id = btn.closest('tr').dataset.id;
+            try {
+              await deleteProduct(id);
+              loadProducts();
+            } catch (e) { alert(e.message); }
+          };
+        });
+      } catch (err) {
+        content.innerHTML = `<p class="error-msg">${err.message}</p>`;
+      }
+    }
+
+      loadProducts();
+    })();
+  </script>
+</body>
+</html>
